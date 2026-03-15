@@ -1,0 +1,215 @@
+# ============================================
+# TP2 - QuickCommerce Infrastructure AWS
+# ============================================
+# Architecture résiliente - 0 SPOF
+# 7 conteneurs : LB + 3 APIs + Postgres Multi-AZ + Redis
+
+services:
+  # ==========================================
+  # LOAD BALANCER (AWS ELB simulé)
+  # ==========================================
+  loadbalancer:
+    image: nginx:alpine
+    container_name: quickcommerce_lb
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx-lb.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-1
+      - api-2
+      - api-3
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================
+  # API INSTANCES (Auto Scaling simulé - 3 instances)
+  # ==========================================
+  api-1:
+    build:
+      context: ./code
+      dockerfile: Dockerfile
+    container_name: quickcommerce_api_1
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      INSTANCE_ID: api-1
+      DB_HOST: postgres-primary
+      DB_PORT: 5432
+      DB_NAME: quickcommerce
+      DB_USER: postgres
+      DB_PASSWORD: aws2024
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api-2:
+    build:
+      context: ./code
+      dockerfile: Dockerfile
+    container_name: quickcommerce_api_2
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      INSTANCE_ID: api-2
+      DB_HOST: postgres-primary
+      DB_PORT: 5432
+      DB_NAME: quickcommerce
+      DB_USER: postgres
+      DB_PASSWORD: aws2024
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api-3:
+    build:
+      context: ./code
+      dockerfile: Dockerfile
+    container_name: quickcommerce_api_3
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      INSTANCE_ID: api-3
+      DB_HOST: postgres-primary
+      DB_PORT: 5432
+      DB_NAME: quickcommerce
+      DB_USER: postgres
+      DB_PASSWORD: aws2024
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================
+  # POSTGRESQL MULTI-AZ (AWS RDS simulé)
+  # ==========================================
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: quickcommerce_postgres_primary
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: quickcommerce
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: aws2024
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+      - ./code/sql/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: quickcommerce_postgres_replica
+    environment:
+      POSTGRES_DB: quickcommerce
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: aws2024
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+      - ./code/sql/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # REDIS CACHE (AWS ElastiCache simulé)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: quickcommerce_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - quickcommerce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis-data:/data
+
+networks:
+  quickcommerce-network:
+    driver: bridge
+    name: quickcommerce-tp2-network
+
+volumes:
+  postgres-primary-data:
+    name: quickcommerce-tp2-postgres-primary
+  postgres-replica-data:
+    name: quickcommerce-tp2-postgres-replica
+  redis-data:
+    name: quickcommerce-tp2-redis
+
+# ============================================
+# COMMANDES UTILES
+# ============================================
+# Démarrer : docker-compose up -d
+# Voir logs : docker-compose logs -f
+# Arrêter : docker-compose down
+# Rebuild : docker-compose up --build -d
+#
+# TESTS :
+# - Health : curl http://localhost/health
+# - Products : curl http://localhost/api/products
+# - Crash API : docker stop quickcommerce_api_1
+# - Failover BDD : docker stop quickcommerce_postgres_primary
+# - Stats : docker stats
